@@ -1,3 +1,6 @@
+#Changed to torch1_python3 version by QuYan at 2019.3.11, run on pycharm
+
+
 import argparse
 import os
 
@@ -5,12 +8,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import network
-import loss
-import pre_process as prep
+import src.network as network
+import src.loss as loss
+import src.pre_process as prep
 import torch.utils.data as util_data
-import lr_schedule
-from data_list import ImageList
+import src.lr_schedule as lr_schedule
+from src.data_list import ImageList
 from torch.autograd import Variable
 
 optim_dict = {"SGD": optim.SGD}
@@ -18,18 +21,18 @@ optim_dict = {"SGD": optim.SGD}
 def image_classification_predict(loader, model, test_10crop=True, gpu=True):
     start_test = True
     if test_10crop:
-        iter_test = [iter(loader['test'+str(i)]) for i in xrange(10)]
-        for i in xrange(len(loader['test0'])):
-            data = [iter_test[j].next() for j in xrange(10)]
-            inputs = [data[j][0] for j in xrange(10)]
+        iter_test = [iter(loader['test'+str(i)]) for i in range(10)]
+        for i in range(len(loader['test0'])):
+            data = [iter_test[j].next() for j in range(10)]
+            inputs = [data[j][0] for j in range(10)]
             if gpu:
-                for j in xrange(10):
+                for j in range(10):
                     inputs[j] = Variable(inputs[j].cuda())
             else:
-                for j in xrange(10):
+                for j in range(10):
                     inputs[j] = Variable(inputs[j])
             outputs = []
-            for j in xrange(10):
+            for j in range(10):
                 outputs.append(model(inputs[j]))
             outputs = sum(outputs)
             if start_test:
@@ -39,7 +42,7 @@ def image_classification_predict(loader, model, test_10crop=True, gpu=True):
                 all_output = torch.cat((all_output, outputs.data.float()), 0)
     else:
         iter_val = iter(loader["test"])
-        for i in xrange(len(loader['test'])):
+        for i in range(len(loader['test'])):
             data = iter_val.next()
             inputs = data[0]
             if gpu:
@@ -58,21 +61,21 @@ def image_classification_predict(loader, model, test_10crop=True, gpu=True):
 def image_classification_test(loader, model, test_10crop=True, gpu=True):
     start_test = True
     if test_10crop:
-        iter_test = [iter(loader['test'+str(i)]) for i in xrange(10)]
-        for i in xrange(len(loader['test0'])):
-            data = [iter_test[j].next() for j in xrange(10)]
-            inputs = [data[j][0] for j in xrange(10)]
+        iter_test = [iter(loader['test'+str(i)]) for i in range(10)]
+        for i in range(len(loader['test0'])):
+            data = [iter_test[j].next() for j in range(10)]
+            inputs = [data[j][0] for j in range(10)]
             labels = data[0][1]
             if gpu:
-                for j in xrange(10):
+                for j in range(10):
                     inputs[j] = Variable(inputs[j].cuda())
                 labels = Variable(labels.cuda())
             else:
-                for j in xrange(10):
+                for j in range(10):
                     inputs[j] = Variable(inputs[j])
                 labels = Variable(labels)
             outputs = []
-            for j in xrange(10):
+            for j in range(10):
                 outputs.append(model(inputs[j]))
             outputs = sum(outputs)
             if start_test:
@@ -84,7 +87,7 @@ def image_classification_test(loader, model, test_10crop=True, gpu=True):
                 all_label = torch.cat((all_label, labels.data.float()), 0)
     else:
         iter_test = iter(loader["test"])
-        for i in xrange(len(loader["test"])):
+        for i in range(len(loader["test"])):
             data = iter_test.next()
             inputs = data[0]
             labels = data[1]
@@ -104,7 +107,7 @@ def image_classification_test(loader, model, test_10crop=True, gpu=True):
                 all_label = torch.cat((all_label, labels.data.float()), 0)
        
     _, predict = torch.max(all_output, 1)
-    accuracy = torch.sum(torch.squeeze(predict).float() == all_label).item() / float(all_label.size()[0])
+    accuracy = float(torch.sum(predict.int() == all_label.int())) / float(all_label.size()[0])
     return accuracy
 
 
@@ -213,18 +216,6 @@ def transfer_classification(config):
     len_train_target = len(dset_loaders["target"]["train"]) - 1
     transfer_loss_value = classifier_loss_value = total_loss_value = 0.0
     for i in range(config["num_iterations"]):
-        ## test in the train
-        if i % config["test_interval"] == 0:
-            base_network.train(False)
-            classifier_layer.train(False)
-            if net_config["use_bottleneck"]:
-                bottleneck_layer.train(False)
-                print image_classification_test(dset_loaders["target"], nn.Sequential(base_network, bottleneck_layer, classifier_layer), test_10crop=prep_dict["target"]["test_10crop"], gpu=use_gpu)
-
-            else:
-                print image_classification_test(dset_loaders["target"], nn.Sequential(base_network, classifier_layer), test_10crop=prep_dict["target"]["test_10crop"], gpu=use_gpu)
-
-        loss_test = nn.BCELoss()
         ## train one iter
         if net_config["use_bottleneck"]:
             bottleneck_layer.train(True)
@@ -249,20 +240,61 @@ def transfer_classification(config):
 
         outputs = classifier_layer(features)
 
-        classifier_loss = class_criterion(outputs.narrow(0, 0, inputs.size(0)/2), labels_source)
+        classifier_loss = class_criterion(outputs.narrow(0, 0, int((inputs.size(0)/2))), labels_source)
+
         ## switch between different transfer loss
         if loss_config["name"] == "DAN":
-            transfer_loss = transfer_criterion(features.narrow(0, 0, features.size(0)/2), features.narrow(0, features.size(0)/2, features.size(0)/2), **loss_config["params"])
+            transfer_loss = transfer_criterion(features.narrow(0, 0, int(features.size(0)/2)), features.narrow(0, int(features.size(0)/2), int(features.size(0)/2)), **loss_config["params"])
         elif loss_config["name"] == "RTN":
             ## RTN is still under developing
             transfer_loss = 0
         elif loss_config["name"] == "JAN":
             softmax_out = softmax_layer(outputs)
-            transfer_loss = transfer_criterion([features.narrow(0, 0, features.size(0)/2), softmax_out.narrow(0, 0, softmax_out.size(0)/2)], [features.narrow(0, features.size(0)/2, features.size(0)/2), softmax_out.narrow(0, softmax_out.size(0)/2, softmax_out.size(0)/2)], **loss_config["params"])
+            transfer_loss = transfer_criterion([features.narrow(0, 0, int(features.size(0)/2)), softmax_out.narrow(0, 0, int(softmax_out.size(0)/2))], [features.narrow(0, int(features.size(0)/2), int(features.size(0)/2)), softmax_out.narrow(0, int(softmax_out.size(0)/2), int(softmax_out.size(0)/2))], **loss_config["params"])
+
 
         total_loss = loss_config["trade_off"] * transfer_loss + classifier_loss
         total_loss.backward()
         optimizer.step()
+
+        ## test in the train
+        if i % config["test_interval"] == 0:
+            print(
+                "------------------------------------------------------------------------------------------------------------",
+                "\niter=", i,
+                "\nclassifier_loss=", round(float(classifier_loss), 3),
+                "\ntransfer_loss=", round(float(transfer_loss), 3)
+            )
+            base_network.train(False)
+            classifier_layer.train(False)
+            if net_config["use_bottleneck"]:
+                bottleneck_layer.train(False)
+                print(
+                    "accuracy=",
+                    round(
+                        image_classification_test(
+                            dset_loaders["target"],
+                            nn.Sequential(base_network,bottleneck_layer, classifier_layer),
+                            test_10crop=prep_dict["target"]["test_10crop"],
+                            gpu=use_gpu
+                        ), 3
+                    )
+                )
+
+            else:
+                print(
+                    "accuracy=",
+                    round(
+                        image_classification_test(
+                            dset_loaders["target"],
+                            nn.Sequential(base_network, classifier_layer),
+                            test_10crop=prep_dict["target"]["test_10crop"],
+                            gpu=use_gpu
+                        ), 3
+                    )
+                )
+
+        loss_test = nn.BCELoss()
 
 
 if __name__ == "__main__":
@@ -277,12 +309,12 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id 
 
     config = {}
-    config["num_iterations"] = 20000
-    config["test_interval"] = 500
+    config["num_iterations"] = 500
+    config["test_interval"] = 100
     config["prep"] = [{"name":"source", "type":"image", "test_10crop":True, "resize_size":256, "crop_size":224}, {"name":"target", "type":"image", "test_10crop":True, "resize_size":256, "crop_size":224}]
     config["loss"] = {"name":args.loss_name, "trade_off":args.tradeoff }
     config["data"] = [{"name":"source", "type":"image", "list_path":{"train":"../data/office/"+args.source+"_list.txt"}, "batch_size":{"train":36, "test":4} }, {"name":"target", "type":"image", "list_path":{"train":"../data/office/"+args.target+"_list.txt"}, "batch_size":{"train":36, "test":4} }]
     config["network"] = {"name":"ResNet50", "use_bottleneck":args.using_bottleneck, "bottleneck_dim":256}
     config["optimizer"] = {"type":"SGD", "optim_params":{"lr":1.0, "momentum":0.9, "weight_decay":0.0005, "nesterov":True}, "lr_type":"inv", "lr_param":{"init_lr":0.0003, "gamma":0.0003, "power":0.75} }
-    print config["loss"]
+    print(config["loss"])
     transfer_classification(config)
