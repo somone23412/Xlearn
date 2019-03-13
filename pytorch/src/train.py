@@ -3,7 +3,7 @@
 
 import argparse
 import os
-
+import datetime
 import numpy as np
 import torch
 import torch.nn as nn
@@ -158,11 +158,22 @@ def transfer_classification(config):
                 else:
                     dsets[data_config["name"]]["test"] = ImageList(open(data_config["list_path"]["train"]).readlines(), transform=prep_dict[data_config["name"]]["test"])
                     dset_loaders[data_config["name"]]["test"] = util_data.DataLoader(dsets[data_config["name"]]["test"], batch_size=data_config["batch_size"]["test"], shuffle=False, num_workers=4)
-    class_num = 31
+
+    class_num = config["classnum"]
 
     ## set base network
     net_config = config["network"]
     base_network = network.network_dict[net_config["name"]]()
+    if net_config["DAN2"]:
+        fc7 =nn.Sequential(
+            nn.ReLU(True),
+            nn.Dropout(),
+            nn.Linear(4096, 4096)
+        )
+        fc7_relu = nn.Sequential(
+            nn.ReLU(True),
+            nn.Dropout()
+        )
     if net_config["use_bottleneck"]:
         bottleneck_layer = nn.Linear(base_network.output_num(), net_config["bottleneck_dim"])
         classifier_layer = nn.Linear(bottleneck_layer.out_features, class_num)
@@ -176,6 +187,8 @@ def transfer_classification(config):
         bottleneck_layer.weight.data.normal_(0, 0.005)
         bottleneck_layer.bias.data.fill_(0.1)
         bottleneck_layer = nn.Sequential(bottleneck_layer, nn.ReLU(), nn.Dropout(0.5))
+
+
     classifier_layer.weight.data.normal_(0, 0.01)
     classifier_layer.bias.data.fill_(0.0)
 
@@ -183,6 +196,11 @@ def transfer_classification(config):
     if use_gpu:
         if net_config["use_bottleneck"]:
             bottleneck_layer = bottleneck_layer.cuda()
+
+        if net_config["DAN2"]:
+            fc7 = fc7.cuda()
+            fc7_relu = fc7_relu.cuda()
+
         classifier_layer = classifier_layer.cuda()
         base_network = base_network.cuda()
 
@@ -215,6 +233,8 @@ def transfer_classification(config):
     len_train_source = len(dset_loaders["source"]["train"]) - 1
     len_train_target = len(dset_loaders["target"]["train"]) - 1
     transfer_loss_value = classifier_loss_value = total_loss_value = 0.0
+
+    ## Quyan::HERE needs to add mini-batch------------------------------------------------------------------------------------------------------------------------
     for i in range(config["num_iterations"]):
         ## train one iter
         if net_config["use_bottleneck"]:
@@ -238,7 +258,11 @@ def transfer_classification(config):
         if net_config["use_bottleneck"]:
             features = bottleneck_layer(features)
 
-        outputs = classifier_layer(features)
+        if net_config["DAN2"]:
+            features2 = fc7(features)
+            outputs = classifier_layer(fc7_relu(features2))
+        else:
+            outputs = classifier_layer(features)
 
         classifier_loss = class_criterion(outputs.narrow(0, 0, int((inputs.size(0)/2))), labels_source)
 
@@ -252,18 +276,22 @@ def transfer_classification(config):
             softmax_out = softmax_layer(outputs)
             transfer_loss = transfer_criterion([features.narrow(0, 0, int(features.size(0)/2)), softmax_out.narrow(0, 0, int(softmax_out.size(0)/2))], [features.narrow(0, int(features.size(0)/2), int(features.size(0)/2)), softmax_out.narrow(0, int(softmax_out.size(0)/2), int(softmax_out.size(0)/2))], **loss_config["params"])
 
+        if net_config["DAN2"]:
+            transfer_loss2 = transfer_criterion(features2.narrow(0, 0, int(features2.size(0)/2)), features2.narrow(0, int(features2.size(0)/2), int(features2.size(0)/2)), **loss_config["params"])
 
         total_loss = loss_config["trade_off"] * transfer_loss + classifier_loss
+        if net_config["DAN2"]:
+            total_loss = total_loss + loss_config["trade_off"] * transfer_loss2
         total_loss.backward()
         optimizer.step()
 
         ## test in the train
         if i % config["test_interval"] == 0:
             print(
-                "------------------------------------------------------------------------------------------------------------",
-                "\niter=", i,
+                datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "----------------------------------iter=", i,
                 "\nclassifier_loss=", round(float(classifier_loss), 3),
-                "\ntransfer_loss=", round(float(transfer_loss), 3)
+                " | transfer_loss=", round(float(transfer_loss), 3)
             )
             base_network.train(False)
             classifier_layer.train(False)
@@ -282,39 +310,69 @@ def transfer_classification(config):
                 )
 
             else:
-                print(
-                    "accuracy=",
-                    round(
-                        image_classification_test(
-                            dset_loaders["target"],
-                            nn.Sequential(base_network, classifier_layer),
-                            test_10crop=prep_dict["target"]["test_10crop"],
-                            gpu=use_gpu
-                        ), 3
+                if net_config["DAN2"]:
+                    print(
+                        "accuracy=",
+                        round(
+                            image_classification_test(
+                                dset_loaders["target"],
+                                nn.Sequential(base_network, fc7, fc7_relu, classifier_layer),
+                                test_10crop=prep_dict["target"]["test_10crop"],
+                                gpu=use_gpu
+                            ), 3
+                        )
                     )
-                )
+                else:
+                    print(
+                        "accuracy=",
+                        round(
+                            image_classification_test(
+                                dset_loaders["target"],
+                                nn.Sequential(base_network, classifier_layer),
+                                test_10crop=prep_dict["target"]["test_10crop"],
+                                gpu=use_gpu
+                            ), 3
+                        )
+                    )
 
         loss_test = nn.BCELoss()
 
+        ## Quyan::snap-------------------------------------------------------------------------------------------------------------------------------------------
+        if config["snap"]["snap"] and i % config["snap"]["step"] == 0:
+            # save model
+            torch.save(base_network, "../model/office/" + config["loss"]["name"] + "_" + config["network"]["name"] + "_iter" + str(config["num_iterations"]) + ".pkl")
+            # torch.save(bottleneck_layer, "../model/office/" + config["loss"]["name"] + "_" + config["network"]["name"] + "_bottleneck_iter" + str(config["num_iterations"]) + ".pkl")
+            torch.save(classifier_layer, "../model/office/" + config["loss"]["name"] + "_" + config["network"]["name"] + "_classifier_iter" + str(config["num_iterations"]) + ".pkl")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Transfer Learning')
-    parser.add_argument('--gpu_id', type=str, nargs='?', default='0', help="device id to run")
-    parser.add_argument('--source', type=str, nargs='?', default='amazon', help="source data")
-    parser.add_argument('--target', type=str, nargs='?', default='webcam', help="target data")
-    parser.add_argument('--loss_name', type=str, nargs='?', default='JAN', help="loss name")
-    parser.add_argument('--tradeoff', type=float, nargs='?', default=1.0, help="tradeoff")
-    parser.add_argument('--using_bottleneck', type=int, nargs='?', default=1, help="whether to use bottleneck")
+    parser.add_argument('--gpu_id', type=str, nargs='?', default='1', help="device id to run")
+    #parser.add_argument('--source', type=str, nargs='?', default='gbu/gbu_train_aligned', help="source data")
+    parser.add_argument('--source', type=str, nargs='?', default='office/amazon', help="source data")
+    #parser.add_argument('--target', type=str, nargs='?', default='gbu/gbu_train_aligned', help="target data")
+    parser.add_argument('--target', type=str, nargs='?', default='office/webcam', help="target data")
+    parser.add_argument('--loss_name', type=str, nargs='?', default='DAN', help="loss name")
+    parser.add_argument('--tradeoff', type=float, nargs='?', default=0.5, help="tradeoff")
+    parser.add_argument('--using_bottleneck', type=int, nargs='?', default=0.0, help="whether to use bottleneck")
     args = parser.parse_args()
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id 
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 
     config = {}
-    config["num_iterations"] = 500
-    config["test_interval"] = 100
-    config["prep"] = [{"name":"source", "type":"image", "test_10crop":True, "resize_size":256, "crop_size":224}, {"name":"target", "type":"image", "test_10crop":True, "resize_size":256, "crop_size":224}]
+    config["num_iterations"] = 20000
+    config["test_interval"] = 1000
+    config["prep"] = [
+        {"name":"source", "type":"image", "test_10crop":True, "resize_size":256, "crop_size":224},
+        {"name":"target", "type":"image", "test_10crop":True, "resize_size":256, "crop_size":224}
+    ]
     config["loss"] = {"name":args.loss_name, "trade_off":args.tradeoff }
-    config["data"] = [{"name":"source", "type":"image", "list_path":{"train":"../data/office/"+args.source+"_list.txt"}, "batch_size":{"train":36, "test":4} }, {"name":"target", "type":"image", "list_path":{"train":"../data/office/"+args.target+"_list.txt"}, "batch_size":{"train":36, "test":4} }]
-    config["network"] = {"name":"ResNet50", "use_bottleneck":args.using_bottleneck, "bottleneck_dim":256}
-    config["optimizer"] = {"type":"SGD", "optim_params":{"lr":1.0, "momentum":0.9, "weight_decay":0.0005, "nesterov":True}, "lr_type":"inv", "lr_param":{"init_lr":0.0003, "gamma":0.0003, "power":0.75} }
-    print(config["loss"])
+    config["data"] = [
+        {"name":"source", "type":"image", "list_path":{"train":"../data/"+args.source+"_list.txt"}, "batch_size":{"train":36, "test":4} },
+        {"name":"target", "type":"image", "list_path":{"train":"../data/"+args.target+"_list.txt"}, "batch_size":{"train":36, "test":4} }
+    ]
+    config["network"] = {"name":"VGGNet16", "use_bottleneck":args.using_bottleneck, "bottleneck_dim":256, "DAN2":True}
+    #config["optimizer"] = {"type":"SGD", "optim_params":{"lr":1.0, "momentum":0.9, "weight_decay":0.0005, "nesterov":True}, "lr_type":"inv", "lr_param":{"init_lr":0.0003, "gamma":0.0003, "power":0.75} }
+    config["optimizer"] = {"type":"SGD", "optim_params":{"lr":1.0, "momentum":0.9, "weight_decay":0.0005, "nesterov":True}, "lr_type":"inv", "lr_param":{"init_lr":0.0001, "gamma":0.0003, "power":0.75} }
+    config["snap"] = {"snap":False, "step":1000}
+    config["classnum"] = 31
+    print(config["loss"], config["network"])
     transfer_classification(config)

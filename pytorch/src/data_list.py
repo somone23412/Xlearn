@@ -102,7 +102,7 @@ class TextData():
 def make_dataset(image_list, labels):
     if labels:
       len_ = len(image_list)
-      images = [(image_list[i].strip(), labels[i, :]) for i in xrange(len_)]
+      images = [(image_list[i].strip(), labels[i, :]) for i in range(len_)]
     else:
       if len(image_list[0].split()) > 2:
         images = [(val.split()[0], np.array([int(la) for la in val.split()[1:]])) for val in image_list]

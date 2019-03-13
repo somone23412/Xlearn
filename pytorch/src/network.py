@@ -22,7 +22,7 @@ class AlexNetFc(nn.Module):
     model_alexnet = models.alexnet(pretrained=True)
     self.features = model_alexnet.features
     self.classifier = nn.Sequential()
-    for i in xrange(6):
+    for i in range(6):
       self.classifier.add_module("classifier"+str(i), model_alexnet.classifier[i])
     self.__in_features = model_alexnet.classifier[6].in_features
   
@@ -34,6 +34,31 @@ class AlexNetFc(nn.Module):
 
   def output_num(self):
     return self.__in_features
+
+# Quyan::VGG16 shuold convnet without the last two layer(to add 2 MMD layer) but one now.-------------------------------------------------------------------------------------------------------
+class VGGNet16Fc(nn.Module):
+  def __init__(self):
+    super(VGGNet16Fc, self).__init__()
+    model_vgg16 = models.vgg16(pretrained=True)
+    self.features = model_vgg16.features
+    self.avgpool = model_vgg16.avgpool
+    self.fc6 = nn.Sequential(
+      nn.Linear(512 * 7 * 7, 4096)
+    )
+
+    self.__in_features = model_vgg16.classifier[6].in_features
+
+
+  def forward(self, x):
+    x = self.features(x)
+    x = self.avgpool(x)
+    x = x.view(x.size(0), -1)
+    x = self.fc6(x)
+    return x
+
+  def output_num(self):
+    return self.__in_features
+
 
 class ResNet18Fc(nn.Module):
   def __init__(self):
@@ -191,4 +216,4 @@ class ResNet152Fc(nn.Module):
   def output_num(self):
     return self.__in_features
 
-network_dict = {"AlexNet":AlexNetFc, "ResNet18":ResNet18Fc, "ResNet34":ResNet34Fc, "ResNet50":ResNet50Fc, "ResNet101":ResNet101Fc, "ResNet152":ResNet152Fc}
+network_dict = {"AlexNet":AlexNetFc, "VGGNet16":VGGNet16Fc, "ResNet18":ResNet18Fc, "ResNet34":ResNet34Fc, "ResNet50":ResNet50Fc, "ResNet101":ResNet101Fc, "ResNet152":ResNet152Fc}
