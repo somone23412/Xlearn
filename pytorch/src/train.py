@@ -8,12 +8,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import src.network as network
-import src.loss as loss
-import src.pre_process as prep
+import network
+import loss
+import pre_process as prep
 import torch.utils.data as util_data
-import src.lr_schedule as lr_schedule
-from src.data_list import ImageList
+import lr_schedule
+from data_list import ImageList
 from torch.autograd import Variable
 
 optim_dict = {"SGD": optim.SGD}
@@ -105,7 +105,6 @@ def image_classification_test(loader, model, test_10crop=True, gpu=True):
             else:
                 all_output = torch.cat((all_output, outputs.data.float()), 0)
                 all_label = torch.cat((all_label, labels.data.float()), 0)
-       
     _, predict = torch.max(all_output, 1)
     accuracy = float(torch.sum(predict.int() == all_label.int())) / float(all_label.size()[0])
     return accuracy
@@ -192,7 +191,8 @@ def transfer_classification(config):
     classifier_layer.weight.data.normal_(0, 0.01)
     classifier_layer.bias.data.fill_(0.0)
 
-    use_gpu = torch.cuda.is_available()
+    use_gpu = config["use_gpu"]
+
     if use_gpu:
         if net_config["use_bottleneck"]:
             bottleneck_layer = bottleneck_layer.cuda()
@@ -346,13 +346,13 @@ def transfer_classification(config):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Transfer Learning')
-    parser.add_argument('--gpu_id', type=str, nargs='?', default='1', help="device id to run")
+    parser.add_argument('--gpu_id', type=str, nargs='?', default='0', help="device id to run")
     #parser.add_argument('--source', type=str, nargs='?', default='gbu/gbu_train_aligned', help="source data")
-    parser.add_argument('--source', type=str, nargs='?', default='office/amazon', help="source data")
+    parser.add_argument('--source', type=str, nargs='?', default='office/webcam', help="source data")
     #parser.add_argument('--target', type=str, nargs='?', default='gbu/gbu_train_aligned', help="target data")
-    parser.add_argument('--target', type=str, nargs='?', default='office/webcam', help="target data")
+    parser.add_argument('--target', type=str, nargs='?', default='office/dslr', help="target data")
     parser.add_argument('--loss_name', type=str, nargs='?', default='DAN', help="loss name")
-    parser.add_argument('--tradeoff', type=float, nargs='?', default=0.5, help="tradeoff")
+    parser.add_argument('--tradeoff', type=float, nargs='?', default=0.25, help="tradeoff")
     parser.add_argument('--using_bottleneck', type=int, nargs='?', default=0.0, help="whether to use bottleneck")
     args = parser.parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
@@ -375,4 +375,7 @@ if __name__ == "__main__":
     config["snap"] = {"snap":False, "step":1000}
     config["classnum"] = 31
     print(config["loss"], config["network"])
+    config["use_gpu"] = torch.cuda.is_available()
+    # config["use_gpu"] = False
+
     transfer_classification(config)
