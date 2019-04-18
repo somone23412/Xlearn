@@ -16,7 +16,7 @@ import lr_schedule
 from data_list import ImageList
 from torch.autograd import Variable
 
-optim_dict = {"SGD": optim.SGD}
+optim_dict = {"SGD": optim.SGD, "Adam": optim.Adam}
 
 def image_classification_predict(loader, model, test_10crop=True, gpu=True):
     start_test = True
@@ -67,6 +67,7 @@ def image_classification_test(loader, model, test_10crop=True, gpu=True):
             inputs = [data[j][0] for j in range(10)]
             labels = data[0][1]
             if gpu:
+                model = model.cuda()
                 for j in range(10):
                     inputs[j] = Variable(inputs[j].cuda())
                 labels = Variable(labels.cuda())
@@ -285,11 +286,21 @@ def transfer_classification(config):
         total_loss.backward()
         optimizer.step()
 
-        ## test in the train
-        if i % config["test_interval"] == 0:
+        ## show loss every show_interval
+
+        if (i + 1) % config["show_interval"] == 0 and not (i + 1) % config["test_interval"] == 0:
             print(
                 datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                "----------------------------------iter=", i,
+                "----------------------------------iter=", i + 1,
+                "\nclassifier_loss=", round(float(classifier_loss), 3),
+                " | transfer_loss=", round(float(transfer_loss), 3)
+            ) 
+
+        ## test in the train
+        if (i + 1) % config["test_interval"] == 0:
+            print(
+                datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "----------------------------------iter=", i + 1,
                 "\nclassifier_loss=", round(float(classifier_loss), 3),
                 " | transfer_loss=", round(float(transfer_loss), 3)
             )
@@ -312,7 +323,18 @@ def transfer_classification(config):
             else:
                 if net_config["DAN2"]:
                     print(
-                        "accuracy=",
+                        "Domain S[" + args.source + "] accuracy=",
+                        round(
+                            image_classification_test(
+                                dset_loaders["source"],
+                                nn.Sequential(base_network, fc7, fc7_relu, classifier_layer),
+                                test_10crop=prep_dict["source"]["test_10crop"],
+                                gpu=use_gpu
+                            ), 3
+                        )
+                    )
+                    print(
+                        "Domain T[" + args.target + "] accuracy=",
                         round(
                             image_classification_test(
                                 dset_loaders["target"],
@@ -338,7 +360,7 @@ def transfer_classification(config):
         loss_test = nn.BCELoss()
 
         ## Quyan::snap-------------------------------------------------------------------------------------------------------------------------------------------
-        if config["snap"]["snap"] and i % config["snap"]["step"] == 0:
+        if config["snap"]["snap"] and (i + 1) % config["snap"]["step"] == 0:
             # save model
             torch.save(base_network, "../model/office/" + config["loss"]["name"] + "_" + config["network"]["name"] + "_iter" + str(config["num_iterations"]) + ".pkl")
             # torch.save(bottleneck_layer, "../model/office/" + config["loss"]["name"] + "_" + config["network"]["name"] + "_bottleneck_iter" + str(config["num_iterations"]) + ".pkl")
@@ -347,10 +369,10 @@ def transfer_classification(config):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Transfer Learning')
     parser.add_argument('--gpu_id', type=str, nargs='?', default='0', help="device id to run")
-    #parser.add_argument('--source', type=str, nargs='?', default='gbu/gbu_train_aligned', help="source data")
-    parser.add_argument('--source', type=str, nargs='?', default='office/webcam', help="source data")
-    #parser.add_argument('--target', type=str, nargs='?', default='gbu/gbu_train_aligned', help="target data")
-    parser.add_argument('--target', type=str, nargs='?', default='office/dslr', help="target data")
+    parser.add_argument('--source', type=str, nargs='?', default='gbu/gbu_train_aligned', help="source data")
+    #parser.add_argument('--source', type=str, nargs='?', default='office/amazon', help="source data")
+    parser.add_argument('--target', type=str, nargs='?', default='gbu/gbu_train_aligned', help="target data")
+    #parser.add_argument('--target', type=str, nargs='?', default='office/webcam', help="target data")
     parser.add_argument('--loss_name', type=str, nargs='?', default='DAN', help="loss name")
     parser.add_argument('--tradeoff', type=float, nargs='?', default=0.25, help="tradeoff")
     parser.add_argument('--using_bottleneck', type=int, nargs='?', default=0.0, help="whether to use bottleneck")
@@ -359,7 +381,8 @@ if __name__ == "__main__":
 
     config = {}
     config["num_iterations"] = 20000
-    config["test_interval"] = 1000
+    config["test_interval"] = 5000
+    config["show_interval"] = 500
     config["prep"] = [
         {"name":"source", "type":"image", "test_10crop":True, "resize_size":256, "crop_size":224},
         {"name":"target", "type":"image", "test_10crop":True, "resize_size":256, "crop_size":224}
@@ -371,10 +394,13 @@ if __name__ == "__main__":
     ]
     config["network"] = {"name":"VGGNet16", "use_bottleneck":args.using_bottleneck, "bottleneck_dim":256, "DAN2":True}
     #config["optimizer"] = {"type":"SGD", "optim_params":{"lr":1.0, "momentum":0.9, "weight_decay":0.0005, "nesterov":True}, "lr_type":"inv", "lr_param":{"init_lr":0.0003, "gamma":0.0003, "power":0.75} }
-    config["optimizer"] = {"type":"SGD", "optim_params":{"lr":1.0, "momentum":0.9, "weight_decay":0.0005, "nesterov":True}, "lr_type":"inv", "lr_param":{"init_lr":0.0001, "gamma":0.0003, "power":0.75} }
+    #config["optimizer"] = {"type":"SGD", "optim_params":{"lr":1.0, "momentum":0.9, "weight_decay":0.0005, "nesterov":True}, "lr_type":"inv", "lr_param":{"init_lr":0.0003, "gamma":0.0003, "power":0.75} }
+    config["optimizer"] = {"type":"Adam", "optim_params":{"lr":1.0, "weight_decay":0.0005, "betas":[0.9, 0.99]}, "lr_type":"inv", "lr_param":{"init_lr":0.001, "gamma":0.0003, "power":0.75} }
     config["snap"] = {"snap":False, "step":1000}
-    config["classnum"] = 31
-    print(config["loss"], config["network"])
+    config["classnum"] = 382
+    print(config["network"])
+    print(config["loss"])
+    print(config["optimizer"])
     config["use_gpu"] = torch.cuda.is_available()
     # config["use_gpu"] = False
 
