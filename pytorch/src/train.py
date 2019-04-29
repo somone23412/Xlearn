@@ -304,6 +304,7 @@ def transfer_classification(config):
                 "\nclassifier_loss=", round(float(classifier_loss), 3),
                 " | transfer_loss=", round(float(transfer_loss), 3)
             )
+            print("optimizer_param=", optimizer.param_groups)
             base_network.train(False)
             classifier_layer.train(False)
             if net_config["use_bottleneck"]:
@@ -380,9 +381,9 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 
     config = {}
-    config["num_iterations"] = 20000
-    config["test_interval"] = 5000
-    config["show_interval"] = 500
+    config["num_iterations"] = 100000
+    config["test_interval"] = 10000
+    config["show_interval"] = 1000
     config["prep"] = [
         {"name":"source", "type":"image", "test_10crop":True, "resize_size":256, "crop_size":224},
         {"name":"target", "type":"image", "test_10crop":True, "resize_size":256, "crop_size":224}
@@ -394,8 +395,8 @@ if __name__ == "__main__":
     ]
     config["network"] = {"name":"VGGNet16", "use_bottleneck":args.using_bottleneck, "bottleneck_dim":256, "DAN2":True}
     #config["optimizer"] = {"type":"SGD", "optim_params":{"lr":1.0, "momentum":0.9, "weight_decay":0.0005, "nesterov":True}, "lr_type":"inv", "lr_param":{"init_lr":0.0003, "gamma":0.0003, "power":0.75} }
-    #config["optimizer"] = {"type":"SGD", "optim_params":{"lr":1.0, "momentum":0.9, "weight_decay":0.0005, "nesterov":True}, "lr_type":"inv", "lr_param":{"init_lr":0.0003, "gamma":0.0003, "power":0.75} }
-    config["optimizer"] = {"type":"Adam", "optim_params":{"lr":1.0, "weight_decay":0.0005, "betas":[0.9, 0.99]}, "lr_type":"inv", "lr_param":{"init_lr":0.001, "gamma":0.0003, "power":0.75} }
+    config["optimizer"] = {"type":"SGD", "optim_params":{"lr":1.0, "momentum":0.9, "weight_decay":0.0005, "nesterov":True}, "lr_type":"inv", "lr_param":{"init_lr":0.01, "gamma":0.0003, "power":0.75} }
+    #config["optimizer"] = {"type":"Adam", "optim_params":{"lr":1.0, "weight_decay":0.0005, "betas":[0.9, 0.99]}, "lr_type":"inv", "lr_param":{"init_lr":0.0005, "gamma":0.0003, "power":0.75} }
     config["snap"] = {"snap":False, "step":1000}
     config["classnum"] = 382
     print(config["network"])
